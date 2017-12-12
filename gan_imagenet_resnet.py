@@ -188,14 +188,14 @@ def ResidualBlock(name, input_dim, output_dim, filter_size, inputs, resample=Non
                                  biases=True, inputs=inputs, spectralnorm=spectralnorm, update_collection=update_collection)
 
     output = inputs
-    output = Normalize(name+'.N1', output, labels=labels, is_training = is_training)
+    output = Normalize(name+'.N1', output, labels=labels, is_training=is_training)
     if 'Discriminator' in name:
         output = lrelu(output)
     if 'Generator' in name:
         output = relu(output)
     output = conv_1(name+'.Conv1', filter_size=filter_size, inputs=output, he_init=he_init, biases=False, spectralnorm=spectralnorm, \
                                       update_collection=update_collection)
-    output = Normalize(name+'.N2', output, labels=labels, is_training = is_training)
+    output = Normalize(name+'.N2', output, labels=labels, is_training=is_training)
     if 'Discriminator' in name:
         output = lrelu(output)
     if 'Generator' in name:
