@@ -18,7 +18,7 @@ def unset_weights_stdev():
     _weights_stdev = None
 
 def Conv2D(name, input_dim, output_dim, filter_size, inputs, he_init=True, mask_type=None, stride=1, weightnorm=None,
-           spectralnorm=None, update_collection = True, biases=True, gain=1.):
+           spectralnorm=False, update_collection=None, biases=True, gain=1.):
     """
     inputs: tensor of shape (batch size, num channels, height, width)
     mask_type: one of None, 'a', 'b'
@@ -93,7 +93,7 @@ def Conv2D(name, input_dim, output_dim, filter_size, inputs, he_init=True, mask_
 
         filters = lib.param(name+'.Filters', filter_values)
 
-        if weightnorm==None:
+        if weightnorm == None:
             weightnorm = _default_weightnorm
         if weightnorm:
             norm_values = np.sqrt(np.sum(np.square(filter_values), axis=(0,1,2)))
@@ -125,6 +125,5 @@ def Conv2D(name, input_dim, output_dim, filter_size, inputs, he_init=True, mask_
             )
 
             result = tf.nn.bias_add(result, _biases, data_format='NCHW')
-
 
         return result

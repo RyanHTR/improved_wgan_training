@@ -85,14 +85,14 @@ def Normalize(name, inputs,labels=None):
         return inputs
 
 
-def ConvMeanPool(name, input_dim, output_dim, filter_size, inputs, he_init=True, biases=True, spectralnorm=False, update_collection = None):
+def ConvMeanPool(name, input_dim, output_dim, filter_size, inputs, he_init=True, biases=True, spectralnorm=False, update_collection=None):
     output = lib.ops.conv2d.Conv2D(name, input_dim, output_dim, filter_size, inputs, he_init=he_init, biases=biases,
                                    spectralnorm=spectralnorm, update_collection=update_collection)
     output = tf.add_n([output[:,:,::2,::2], output[:,:,1::2,::2], output[:,:,::2,1::2], output[:,:,1::2,1::2]]) / 4.
     return output
 
 
-def MeanPoolConv(name, input_dim, output_dim, filter_size, inputs, he_init=True, biases=True, spectralnorm=False, update_collection = None):
+def MeanPoolConv(name, input_dim, output_dim, filter_size, inputs, he_init=True, biases=True, spectralnorm=False, update_collection=None):
     output = inputs
     output = tf.add_n([output[:,:,::2,::2], output[:,:,1::2,::2], output[:,:,::2,1::2], output[:,:,1::2,1::2]]) / 4.
     output = lib.ops.conv2d.Conv2D(name, input_dim, output_dim, filter_size, output, he_init=he_init, biases=biases,
@@ -100,7 +100,7 @@ def MeanPoolConv(name, input_dim, output_dim, filter_size, inputs, he_init=True,
     return output
 
 
-def UpsampleConv(name, input_dim, output_dim, filter_size, inputs, he_init=True, biases=True, spectralnorm=False, update_collection = None):
+def UpsampleConv(name, input_dim, output_dim, filter_size, inputs, he_init=True, biases=True, spectralnorm=False, update_collection=None):
     output = inputs
     output = tf.concat([output, output, output, output], axis=1)
     output = tf.transpose(output, [0,2,3,1])
@@ -272,13 +272,14 @@ with tf.Session() as session:
                 labels_splits[len(DEVICES_A)+i]
             ], axis=0)
 
-            disc_real, disc_real_acgan = Discriminator(real_data, real_labels, update_collection=None)
-            disc_fake, disc_fake_acgan = Discriminator(fake_data, fake_labels, update_collection="NO_OPS")
+            disc_real, disc_real_acgan = Discriminator(real_data, real_labels, update_collection="NO_OPS")
+            disc_fake, disc_fake_acgan = Discriminator(fake_data, fake_labels, update_collection=None)
 
             #discriminator_loss_real = tf.reduce_mean(tf.minimum(0., -1. + disc_real))
             #discriminator_loss_fake = tf.reduce_mean(tf.minimum(0., -1. - disc_fake))
 
-            disc_costs.append(tf.reduce_mean(-disc_real) + tf.reduce_mean(disc_fake))
+            # disc_costs.append(tf.reduce_mean(-disc_real) + tf.reduce_mean(disc_fake))  # origin loss
+            disc_costs.append(tf.reduce_mean(tf.nn.softplus(disc_fake) + tf.nn.softplus(-disc_real)))  # sngan d_loss
             """
             if CONDITIONAL and ACGAN:
                 disc_acgan_costs.append(tf.reduce_mean(
@@ -345,7 +346,8 @@ with tf.Session() as session:
                     tf.nn.sparse_softmax_cross_entropy_with_logits(logits=disc_fake_acgan, labels=fake_labels)
                 ))
             else:
-                gen_costs.append(-tf.reduce_mean((Discriminator(Generator(n_samples, fake_labels), fake_labels, update_collection="NO_OPS")[0])))
+                # gen_costs.append(-tf.reduce_mean((Discriminator(Generator(n_samples, fake_labels), fake_labels, update_collection="NO_OPS")[0])))
+                gen_costs.append(tf.reduce_mean(tf.nn.softplus(-disc_fake)))  # sngan g-loss
     gen_cost = (tf.add_n(gen_costs) / len(DEVICES))
     if CONDITIONAL and ACGAN:
         gen_cost += (ACGAN_SCALE_G*(tf.add_n(gen_acgan_costs) / len(DEVICES)))
@@ -389,7 +391,7 @@ with tf.Session() as session:
                 yield images, _labels
 
 
-    for name,grads_and_vars in [('G', gen_gv), ('D', disc_gv)]:
+    for name, grads_and_vars in [('G', gen_gv), ('D', disc_gv)]:
         print "{} Params:".format(name)
         total_param_count = 0
         for g, v in grads_and_vars:
