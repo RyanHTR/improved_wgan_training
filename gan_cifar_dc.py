@@ -7,6 +7,7 @@ import tflib as lib
 import tflib.ops.linear
 import tflib.ops.cond_batchnorm
 import tflib.ops.conv2d
+import tflib.ops.deconv2d
 import tflib.ops.batchnorm
 import tflib.save_images
 import tflib.cifar10
@@ -42,9 +43,9 @@ DIM_D = 128 # Critic dimensionality
 NORMALIZATION_G = True  # Use batchnorm in generator?
 NORMALIZATION_D = False  # Use batchnorm (or layernorm) in critic?
 OUTPUT_DIM = 3072 # Number of pixels in CIFAR10 (32*32*3)
-LR = 2e-4 # Initial learning rate
-DECAY = True # Whether to decay LR over learning
-N_CRITIC = 5 # Critic steps per generator steps
+LR = 1e-4 # Initial learning rate
+DECAY = False # Whether to decay LR over learning
+N_CRITIC = 1 # Critic steps per generator steps
 INCEPTION_FREQUENCY = 1000 # How frequently to calculate Inception score
 
 CONDITIONAL = False # Whether to train a conditional or unconditional model
@@ -65,8 +66,10 @@ lib.print_model_settings(locals().copy())
 def nonlinearity(x):
     return tf.nn.relu(x)
 
+
 def LeakyReLU(x, alpha=0.1):
     return tf.maximum(alpha*x, x)
+
 
 def Normalize(name, inputs,labels=None):
     """This is messy, but basically it chooses between batchnorm, layernorm, 
@@ -169,68 +172,66 @@ def OptimizedResBlockDisc1(inputs):
     output = conv_2('Discriminator.1.Conv2', 3, output)
     return shortcut + output
 
-# def Generator(n_samples, labels, noise=None):
-#     if noise is None:
-#         noise = tf.random_normal([n_samples, 128])
-#     output = lib.ops.linear.Linear('Generator.Input', 128, 4*4*DIM_G, noise)
-#     output = tf.reshape(output, [-1, DIM_G, 4, 4])
-#     output = ResidualBlock('Generator.1', DIM_G, DIM_G, 3, output, resample='up', labels=labels)
-#     output = ResidualBlock('Generator.2', DIM_G, DIM_G, 3, output, resample='up', labels=labels)
-#     output = ResidualBlock('Generator.3', DIM_G, DIM_G, 3, output, resample='up', labels=labels)
-#     output = Normalize('Generator.OutputN', output)
-#     output = nonlinearity(output)
-#     output = lib.ops.conv2d.Conv2D('Generator.Output', DIM_G, 3, 3, output, he_init=False)
-#     output = tf.tanh(output)
-#     return tf.reshape(output, [-1, OUTPUT_DIM])
-#
-# def Discriminator(inputs, labels):
-#     output = tf.reshape(inputs, [-1, 3, 32, 32])
-#     output = OptimizedResBlockDisc1(output)
-#     output = ResidualBlock('Discriminator.2', DIM_D, DIM_D, 3, output, resample='down', labels=labels)
-#     output = ResidualBlock('Discriminator.3', DIM_D, DIM_D, 3, output, resample=None, labels=labels)
-#     output = ResidualBlock('Discriminator.4', DIM_D, DIM_D, 3, output, resample=None, labels=labels)
-#     output = nonlinearity(output)
-#     output = tf.reduce_mean(output, axis=[2,3])
-#     output_wgan = lib.ops.linear.Linear('Discriminator.Output', DIM_D, 1, output)
-#     output_wgan = tf.reshape(output_wgan, [-1])
-#     if CONDITIONAL and ACGAN:
-#         output_acgan = lib.ops.linear.Linear('Discriminator.ACGANOutput', DIM_D, 10, output)
-#         return output_wgan, output_acgan
-#     else:
-#         return output_wgan, None
-
 
 def Generator(n_samples, labels=None, noise=None):
     if noise is None:
         noise = tf.random_normal([n_samples, 128])
-    output = lib.ops.linear.Linear('Generator.Input', 128, 4*4*DIM_G, noise)
-    output = tf.reshape(output, [-1, DIM_G, 4, 4])
-    output = ResidualBlock('Generator.1', DIM_G, DIM_G_SN, 3, output, resample='up', labels=labels)
-    output = ResidualBlock('Generator.2', DIM_G_SN, DIM_G_SN, 3, output, resample='up', labels=labels)
-    output = ResidualBlock('Generator.3', DIM_G_SN, DIM_G_SN, 3, output, resample='up', labels=labels)
-    output = Normalize('Generator.OutputN', output)
-    output = nonlinearity(output)
-    output = lib.ops.conv2d.Conv2D('Generator.Output', DIM_G_SN, 3, 3, output, he_init=False)
+
+    output = lib.ops.linear.Linear('Generator.Input', 128, 4*4*512, noise)
+    output = tf.reshape(output, [-1, 512, 4, 4])
+
+    output = lib.ops.deconv2d.Deconv2D('Generator.1', 512, 256, 5, output)
+    output = lib.ops.batchnorm.Batchnorm('Generator.BN1', [0, 2, 3], output)
+    output = tf.nn.relu(output)
+
+    output = lib.ops.deconv2d.Deconv2D('Generator.2', 256, 128, 4, output)
+    output = lib.ops.batchnorm.Batchnorm('Generator.BN2', [0, 2, 3], output)
+    output = tf.nn.relu(output)
+
+    output = lib.ops.deconv2d.Deconv2D('Generator.3', 128, 64, 4, output)
+    output = lib.ops.batchnorm.Batchnorm('Generator.BN3', [0, 2, 3], output)
+    output = tf.nn.relu(output)
+
+    output = lib.ops.conv2d.Conv2D('Generator.Output', 64, 3, 3, output, he_init=False)
     output = tf.tanh(output)
+
     return tf.reshape(output, [-1, OUTPUT_DIM])
 
 
 def Discriminator(inputs, labels=None, update_collection=None):
     spectralnorm = True
     output = tf.reshape(inputs, [-1, 3, 32, 32])
-    output = ResidualBlock('Discriminator.1', 3, DIM_D, 3, output, resample='down', labels=labels, spectralnorm=spectralnorm, update_collection=update_collection)
-    output = ResidualBlock('Discriminator.2', DIM_D, DIM_D, 3, output, resample='down', labels=labels, spectralnorm=spectralnorm, update_collection=update_collection)
-    output = ResidualBlock('Discriminator.3', DIM_D, DIM_D, 3, output, labels=labels, spectralnorm=spectralnorm, update_collection=update_collection)
-    output = ResidualBlock('Discriminator.4', DIM_D, DIM_D, 3, output, labels=labels, spectralnorm=spectralnorm, update_collection=update_collection)
-    output = tf.reduce_sum(output, axis=[2, 3], name='Discriminator.reduce_sum')
-    output = nonlinearity(output)
-    output_wgan = lib.ops.linear.Linear('Discriminator.Output', DIM_D, 1, output)
-    output_wgan = tf.reshape(output_wgan, [-1])
-    if CONDITIONAL and ACGAN:
-        output_acgan = lib.ops.linear.Linear('Discriminator.ACGANOutput', DIM_D, 10, output)
-        return output_wgan, output_acgan
-    else:
-        return output_wgan, None
+
+    output = lib.ops.conv2d.Conv2D('Discriminator.1.1', 3, 64, 3, output, stride=1,
+                                   spectralnorm=spectralnorm, update_collection=update_collection)
+    output = LeakyReLU(output)
+    output = lib.ops.conv2d.Conv2D('Discriminator.1.2', 64, 64, 4, output, stride=2,
+                                   spectralnorm=spectralnorm, update_collection=update_collection)
+    output = LeakyReLU(output)
+
+    output = lib.ops.conv2d.Conv2D('Discriminator.2.1', 64, 128, 3, output, stride=1,
+                                   spectralnorm=spectralnorm, update_collection=update_collection)
+    output = LeakyReLU(output)
+    output = lib.ops.conv2d.Conv2D('Discriminator.2.2', 128, 128, 4, output, stride=2,
+                                   spectralnorm=spectralnorm, update_collection=update_collection)
+    output = LeakyReLU(output)
+
+    output = lib.ops.conv2d.Conv2D('Discriminator.3.1', 128, 256, 3, output, stride=1,
+                                   spectralnorm=spectralnorm, update_collection=update_collection)
+    output = LeakyReLU(output)
+    output = lib.ops.conv2d.Conv2D('Discriminator.3.2', 256, 256, 4, output, stride=2,
+                                   spectralnorm=spectralnorm, update_collection=update_collection)
+    output = LeakyReLU(output)
+
+    output = lib.ops.conv2d.Conv2D('Discriminator.4.1', 256, 512, 3, output, stride=1,
+                                   spectralnorm=spectralnorm, update_collection=update_collection)
+    output = LeakyReLU(output)
+
+    output = tf.reshape(output, [BATCH_SIZE, -1])
+    output = lib.ops.linear.Linear('Discriminator.Output', int(output.get_shape()[1]), 1, output,
+                                   spectralnorm=spectralnorm, update_collection=update_collection)
+
+    return tf.reshape(output, [-1])
 
 with tf.Session() as session:
 
@@ -243,6 +244,8 @@ with tf.Session() as session:
     fake_data_splits = []
     for i, device in enumerate(DEVICES):
         with tf.device(device):
+            kk = BATCH_SIZE / len(DEVICES)
+            hh = Generator(BATCH_SIZE/len(DEVICES), labels_splits[i])
             fake_data_splits.append(Generator(BATCH_SIZE/len(DEVICES), labels_splits[i]))
 
     all_real_data = tf.reshape(2*((tf.cast(all_real_data_int, tf.float32)/256.)-.5), [BATCH_SIZE, OUTPUT_DIM])
@@ -275,38 +278,14 @@ with tf.Session() as session:
                 labels_splits[len(DEVICES_A)+i]
             ], axis=0)
 
-            disc_real, disc_real_acgan = Discriminator(real_data, real_labels, update_collection="NO_OPS")
-            disc_fake, disc_fake_acgan = Discriminator(fake_data, fake_labels, update_collection=None)
+            disc_real = Discriminator(real_data, real_labels, update_collection="NO_OPS")
+            disc_fake = Discriminator(fake_data, fake_labels, update_collection=None)
 
             #discriminator_loss_real = tf.reduce_mean(tf.minimum(0., -1. + disc_real))
             #discriminator_loss_fake = tf.reduce_mean(tf.minimum(0., -1. - disc_fake))
 
             # disc_costs.append(tf.reduce_mean(-disc_real) + tf.reduce_mean(disc_fake))  # origin loss
             disc_costs.append(tf.reduce_mean(tf.nn.softplus(disc_fake) + tf.nn.softplus(-disc_real)))  # sngan d_loss
-            """
-            if CONDITIONAL and ACGAN:
-                disc_acgan_costs.append(tf.reduce_mean(
-                    tf.nn.sparse_softmax_cross_entropy_with_logits(logits=disc_all_acgan[:BATCH_SIZE/len(DEVICES_A)], labels=real_and_fake_labels[:BATCH_SIZE/len(DEVICES_A)])
-                ))
-                disc_acgan_accs.append(tf.reduce_mean(
-                    tf.cast(
-                        tf.equal(
-                            tf.to_int32(tf.argmax(disc_all_acgan[:BATCH_SIZE/len(DEVICES_A)], dimension=1)),
-                            real_and_fake_labels[:BATCH_SIZE/len(DEVICES_A)]
-                        ),
-                        tf.float32
-                    )
-                ))
-                disc_acgan_fake_accs.append(tf.reduce_mean(
-                    tf.cast(
-                        tf.equal(
-                            tf.to_int32(tf.argmax(disc_all_acgan[BATCH_SIZE/len(DEVICES_A):], dimension=1)),
-                            real_and_fake_labels[BATCH_SIZE/len(DEVICES_A):]
-                        ),
-                        tf.float32
-                    )
-                ))
-            """
 
     for i, device in enumerate(DEVICES_B):
         with tf.device(device):
@@ -343,21 +322,21 @@ with tf.Session() as session:
             n_samples = GEN_BS_MULTIPLE * BATCH_SIZE / len(DEVICES)
             fake_labels = tf.cast(tf.random_uniform([n_samples])*10, tf.int32)
             if CONDITIONAL and ACGAN:
-                disc_fake, disc_fake_acgan = Discriminator(Generator(n_samples,fake_labels), fake_labels)
-                gen_costs.append(-tf.reduce_mean(disc_fake))
-                gen_acgan_costs.append(tf.reduce_mean(
-                    tf.nn.sparse_softmax_cross_entropy_with_logits(logits=disc_fake_acgan, labels=fake_labels)
-                ))
+                disc_fake = Discriminator(Generator(n_samples, fake_labels), fake_labels)
+                # gen_costs.append(-tf.reduce_mean(disc_fake))
+                # gen_acgan_costs.append(tf.reduce_mean(
+                #     tf.nn.sparse_softmax_cross_entropy_with_logits(logits=disc_fake_acgan, labels=fake_labels)
+                # ))
             else:
                 # gen_costs.append(-tf.reduce_mean((Discriminator(Generator(n_samples, fake_labels), fake_labels, update_collection="NO_OPS")[0])))
                 gen_costs.append(tf.reduce_mean(tf.nn.softplus(-(Discriminator(Generator(n_samples, fake_labels),
-                                                                               fake_labels, update_collection="NO_OPS")[0]))))  # sngan g-loss
+                                                                               fake_labels, update_collection="NO_OPS")))))  # sngan g-loss
     gen_cost = (tf.add_n(gen_costs) / len(DEVICES))
     if CONDITIONAL and ACGAN:
         gen_cost += (ACGAN_SCALE_G*(tf.add_n(gen_acgan_costs) / len(DEVICES)))
 
-    gen_opt = tf.train.AdamOptimizer(learning_rate=LR*decay, beta1=0., beta2=0.9)
-    disc_opt = tf.train.AdamOptimizer(learning_rate=LR*decay, beta1=0., beta2=0.9)
+    gen_opt = tf.train.AdamOptimizer(learning_rate=LR*decay, beta1=0.5, beta2=0.999)
+    disc_opt = tf.train.AdamOptimizer(learning_rate=LR*decay, beta1=0.5, beta2=0.999)
     gen_gv = gen_opt.compute_gradients(gen_cost, var_list=lib.params_with_name('Generator'))
     disc_gv = disc_opt.compute_gradients(disc_cost, var_list=disc_params)
     gen_train_op = gen_opt.apply_gradients(gen_gv)
@@ -426,7 +405,7 @@ with tf.Session() as session:
             _ = session.run([gen_train_op], feed_dict={_iteration:iteration})
 
         for i in xrange(N_CRITIC):
-            _data,_labels = gen.next()
+            _data, _labels = gen.next()
             if CONDITIONAL and ACGAN:
                 _disc_cost, _disc_wgan, _disc_acgan, _disc_acgan_acc, _disc_acgan_fake_acc, _ = session.run([disc_cost, disc_wgan, disc_acgan, disc_acgan_acc, disc_acgan_fake_acc, disc_train_op], feed_dict={all_real_data_int: _data, all_real_labels:_labels, _iteration:iteration})
             else:

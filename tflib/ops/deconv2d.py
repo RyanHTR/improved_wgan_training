@@ -93,11 +93,12 @@ def Deconv2D(
 
         inputs = tf.transpose(inputs, [0,2,3,1], name='NCHW_to_NHWC')
 
-        input_shape = tf.shape(inputs)
+        # input_shape = tf.shape(inputs)
+        input_shape = inputs.get_shape()
         try: # tf pre-1.0 (top) vs 1.0 (bottom)
-            output_shape = tf.pack([input_shape[0], 2*input_shape[1], 2*input_shape[2], output_dim])
+            output_shape = tf.pack([int(input_shape[0]), 2*int(input_shape[1]), 2*int(input_shape[2]), output_dim])
         except Exception as e:
-            output_shape = tf.stack([input_shape[0], 2*input_shape[1], 2*input_shape[2], output_dim])
+            output_shape = tf.stack([int(input_shape[0]), 2*int(input_shape[1]), 2*int(input_shape[2]), output_dim])
 
         result = tf.nn.conv2d_transpose(
             value=inputs, 

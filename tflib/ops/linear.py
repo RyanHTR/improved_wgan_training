@@ -33,8 +33,8 @@ def Linear(
         biases=True,
         initialization=None,
         weightnorm=None,
-        spectralnorm=None,
-        update_collection = True,
+        spectralnorm=False,
+        update_collection=None,
         gain=1.
         ):
     """
